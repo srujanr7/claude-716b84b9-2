@@ -1,0 +1,176 @@
+<!-- frontend/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notes</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #4f46e5;
+    --accent-dark: #4338ca;
+    --error: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111318;
+      --card: #1b1e25;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #2d323c;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    padding: 32px 16px;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.8rem; margin-bottom: 20px; }
+  form, .note {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+  }
+  form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+  input, textarea {
+    width: 100%;
+    font: inherit;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  textarea { min-height: 100px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button {
+    align-self: flex-end;
+    font: inherit;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+
+  }
+  button:hover:not(:disabled) { background: var(--accent-dark); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { color: var(--error); font-size: 0.9rem; min-height: 1.2em; }
+  .list { display: flex; flex-direction: column; gap: 12px; }
+  .note h2 { font-size: 1.05rem; margin-bottom: 6px; }
+  .note p { white-space: pre-wrap; line-height: 1.5; }
+  .note time { display: block; margin-top: 10px; font-size: 0.8rem; color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Notes</h1>
+
+  <form id="noteForm">
+    <input id="title" placeholder="Title (optional)" maxlength="120">
+    <textarea id="body" placeholder="Write a note…" required></textarea>
+    <div class="error" id="error"></div>
+    <button type="submit" id="submitBtn">Add note</button>
+  </form>
+
+  <div class="list" id="list"><p class="empty">Loading…</p></div>
+</main>
+
+<script>
+  const API = "/api/notes";
+  const form = document.getElementById("noteForm");
+  const titleEl = document.getElementById("title");
+  const bodyEl = document.getElementById("body");
+  const errorEl = document.getElementById("error");
+  const submitBtn = document.getElementById("submitBtn");
+
+  const listEl = document.getElementById("list");
+
+  function renderNotes(notes) {
+    listEl.innerHTML = "";
+    if (!notes.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "No notes yet. Add your first one above.";
+      listEl.appendChild(p);
+      return;
+    }
+    notes.forEach((n) => {
+      const card = document.createElement("article");
+      card.className = "note";
+
+      const h = document.createElement("h2");
+      h.textContent = n.title;
+
+      const p = document.createElement("p");
+      p.textContent = n.body;
+
+      const t = document.createElement("time");
+      t.dateTime = n.createdAt;
+      t.textContent = new Date(n.createdAt).toLocaleString();
+
+      card.append(h, p, t);
+      listEl.appendChild(card);
+    });
+  }
+
+  async function loadNotes() {
+    try {
+
+      const res = await fetch(API);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      renderNotes(await res.json());
+    } catch (err) {
+      listEl.innerHTML = "";
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "Couldn't load notes: " + err.message;
+      listEl.appendChild(p);
+    }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    errorEl.textContent = "";
+    const body = bodyEl.value.trim();
+    if (!body) {
+      errorEl.textContent = "Note can't be empty.";
+      return;
+    }
+
+    submitBtn.disabled = true;
+    try {
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: titleEl.value.trim(), body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      form.reset();
+      await loadNotes();
+
+    } catch (err) {
+      errorEl.textContent = err.message;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  loadNotes();
+</script>
+</body>
+</html>
