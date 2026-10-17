@@ -1,43 +1,77 @@
+// server.js
 const express = require("express");
+const { Pool } = require("pg");
+
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is not set");
+  process.exit(1);
+}
+
+function buildPoolConfig(rawUrl) {
+  const url = new URL(rawUrl);
+  const sslmode = (url.searchParams.get("sslmode") || "").toLowerCase();
+  const sslParam = (url.searchParams.get("ssl") || "").toLowerCase();
+  const needsSsl =
+    ["require", "verify-ca", "verify-full", "prefer"].includes(sslmode) ||
+    ["true", "1"].includes(sslParam);
+
+  if (!needsSsl) return { connectionString: rawUrl };
+
+  // Strip SSL params so they don't override the ssl object below
+  url.searchParams.delete("sslmode");
+  url.searchParams.delete("ssl");
+  return {
+    connectionString: url.toString(),
+    ssl: { rejectUnauthorized: false },
+  };
+}
+
+const pool = new Pool(buildPoolConfig(process.env.DATABASE_URL));
+
+pool.on("error", (err) => {
+  console.error("Unexpected Postgres pool error:", err);
+
+});
 
 const app = express();
 app.use(express.json());
 
-let nextId = 6;
-const quotes = [
-  { id: 1, text: "Well done is better than well said.", author: "Benjamin Franklin" },
-  { id: 2, text: "Luck is what happens when preparation meets opportunity.", author: "Seneca" },
-  { id: 3, text: "It does not matter how slowly you go as long as you do not stop.", author: "Confucius" },
-  { id: 4, text: "A journey of a thousand miles begins with a single step.", author: "Lao Tzu" },
-  { id: 5, text: "Knowing yourself is the beginning of all wisdom.", author: "Aristotle" },
-];
-
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
+// CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
 });
 
-app.get("/api/quotes", (req, res) => {
-  res.json(quotes);
+app.get("/api/todos", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, title, created_at FROM todos ORDER BY created_at DESC, id DESC"
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.post("/api/quotes", (req, res) => {
-  const { text, author } = req.body || {};
-
-  if (typeof text !== "string" || !text.trim()) {
-    return res.status(400).json({ error: "'text' is required and must be a non-empty string." });
-  }
-  if (author !== undefined && typeof author !== "string") {
-    return res.status(400).json({ error: "'author' must be a string if provided." });
+app.post("/api/todos", async (req, res, next) => {
+  const { title } = req.body || {};
+  if (typeof title !== "string" || !title.trim()) {
+    return res.status(400).json({ error: "'title' is required and must be a non-empty string." });
   }
 
+  try {
 
-  const quote = {
-    id: nextId++,
-    text: text.trim(),
-    author: author && author.trim() ? author.trim() : "Unknown",
-  };
-  quotes.push(quote);
-  res.status(201).json(quote);
+    const { rows } = await pool.query(
+      "INSERT INTO todos (title) VALUES ($1) RETURNING id, title, created_at",
+      [title.trim()]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.use((req, res) => {
@@ -53,6 +87,12 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`Todos server listening on port ${PORT}`);
 });
+
+function shutdown() {
+  server.close(() => pool.end().then(() => process.exit(0)));
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
